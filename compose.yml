@@ -1,0 +1,99 @@
+services:
+  fastapi:
+    build:
+      context: .
+      dockerfile: fastapi.Dockerfile
+    restart: "no"
+    ports:
+      - "8000:8000"
+    volumes:
+      - "backend:/backend"
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: "384mb"
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: nginx.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - "nginx:/etc/nginx"
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: "64mb"
+  grafana:
+    build:
+      context: ./grafana
+      dockerfile: grafana.dockerfile
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - prometheus_node_exporter
+    ports:
+      - "3000:3000"
+    volumes:
+      - "grafana:/etc/grafana"
+    environment:
+     - GOMEMLIMIT=384MiB
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "448mb"
+  prometheus:
+    build:
+      context: ./prometheus
+      dockerfile: prometheus.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - "prometheus:/etc/prometheus"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "128mb"
+  prometheus_node_exporter:
+    image: prom/node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "32mb"
+  nginx_exporter:
+    image: nginx/nginx-prometheus-exporter
+    restart: unless-stopped
+    ports:
+      - "9113:9113"
+    command:
+     - '--nginx.scrape-uri=http://nginx:8080/stub_status'
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "32mb"
+
+volumes:
+  backend: {}
+  nginx: {}
+  grafana: {}
+  prometheus: {}
