@@ -21,7 +21,7 @@ url = APIRouter()
 
 @url.get("/{s_url}", tags=["Link"])
 @limiter.limit("100000/minute")
-async def redirect(s_url: str, urls_db: urls_db, request: Request):
+async def redirect(s_url: str, urls_db: urls_db, request: Request, response: Response):
     try:
         original_url = (
             await urls_db.execute(
