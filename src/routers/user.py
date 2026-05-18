@@ -1,5 +1,4 @@
 from typing import Annotated
-import logging
 
 from fastapi import APIRouter, Depends, Request, Response, HTTPException
 from sqlalchemy import select, insert, update
@@ -11,31 +10,23 @@ from models.user import User
 from security.security import create_token, hash_pass, compare_pass
 from utils.limiter import limiter
 from utils.logger import logger
+from utils.db import transaction_process
 
 
 user = APIRouter(prefix="/user")
 
 
 async def is_user_exist(user_m: User_m, user_db: users_db) -> User | None:
-    try:
-        if user_m is None:
-            logger.warning("User hasn't exist")
-            raise HTTPException(status_code=400)
+    result = (
+        await transaction_process(user_db, select(User).where(User.username == user_m.username))
+    ).scalar_one_or_none()
 
-        result = (
-            await user_db.execute(select(User).where(User.username == user_m.username))
-        ).scalar_one_or_none()
+    if result is None:
+        logger.warning("User hasn't exist")
 
-        if result is None:
-            logger.warning("User hasn't exist")
-            return None
+        return None
 
-        return result
-
-    except (IntegrityError, SQLAlchemyError) as e:
-        logger.exception(f"DB Error: {e}!")
-
-        raise HTTPException(status_code=500, detail="Server error!")
+    return result
 
 
 @user.post(
@@ -58,35 +49,23 @@ async def register(
     user: Annotated[User | None, Depends(is_user_exist)],
 ):
     if user is not None:
-        logger.warning("User already exist")
         raise HTTPException(status_code=400)
 
-    try:
-        password = await hash_pass(user_m.password)
+    password = await hash_pass(user_m.password)
 
-        await user_db.execute(
-            insert(User).values(username=user_m.username, password=password, token="")
-        )
-        await user_db.commit()
+    await transaction_process(
+        user_db, insert(User).values(username=user_m.username, password=password, token="")
+    )
 
-        result = (
-            await user_db.execute(select(User).where(User.username == user_m.username))
-        ).scalar_one_or_none()
-        await user_db.commit()
+    result = (
+        await transaction_process(user_db, select(User).where(User.username == user_m.username))
+    ).scalar_one_or_none()
 
-        token = await create_token(result.id)
+    token = await create_token(result.id)
 
-        await user_db.execute(
-            update(User).where(User.username == user_m.username).values(token=token)
-        )
-        await user_db.commit()
-
-    except (IntegrityError, SQLAlchemyError) as e:
-        logger.exception(f"DB Error: {e}!")
-
-        await user_db.rollback()
-        raise HTTPException(status_code=500)
-
+    await transaction_process(
+        user_db, update(User).where(User.username == user_m.username).values(token=token)
+    )
     response.set_cookie(key="token", value=token)
 
 
@@ -117,11 +96,11 @@ async def login(
 
     token = await create_token(user.id)
 
-    await user_db.execute(
+    await transaction_process(
+        user_db,
         update(User)
         .where(User.username == user.username, User.password == user.password)
-        .values(token=token)
+        .values(token=token),
     )
-    await user_db.commit()
 
     response.set_cookie(key="token", value=user.token)

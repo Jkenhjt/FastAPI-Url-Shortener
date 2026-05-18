@@ -1,5 +1,4 @@
 from typing import Annotated
-import logging
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Cookie, Request
@@ -15,6 +14,7 @@ from schemas.admin import LinkAdd, LinkDelete, LinkGetData
 from utils.utils import generate_url
 from utils.limiter import limiter
 from utils.logger import logger
+from utils.db import transaction_process
 
 load_dotenv()
 
@@ -23,29 +23,28 @@ DOMAIN = os.getenv("DOMAIN")
 
 admin = APIRouter(prefix="/admin")
 
+responses_metadata = {
+    403: {"description": "Incorrect token! Login first!"},
+    500: {"description": "Server error!"},
+}
+
 
 async def is_user_exist(request: Request, user_db: users_db) -> User | None:
     token: str = request.cookies.get("token")
 
-    try:
-        if token is None:
-            logger.warning("User hasn't exist")
-            raise HTTPException(status_code=403)
+    if token is None:
+        logger.warning("User hasn't exist, no token")
+        raise HTTPException(status_code=403)
 
-        result = (
-            await user_db.execute(select(User).where(User.token == token))
-        ).scalar_one_or_none()
+    result = (
+        await transaction_process(user_db, select(User).where(User.token == token))
+    ).scalar_one_or_none()
 
-        if result is None:
-            logger.warning("User hasn't exist")
-            raise HTTPException(status_code=403)
+    if result is None:
+        logger.warning("User hasn't exist, no in db")
+        raise HTTPException(status_code=403)
 
-        return result
-
-    except (IntegrityError, SQLAlchemyError) as e:
-        logger.exception(f"DB Error: {e}!")
-
-        raise HTTPException(status_code=500, detail="Server error!")
+    return result
 
 
 @admin.post(
@@ -56,8 +55,6 @@ async def is_user_exist(request: Request, user_db: users_db) -> User | None:
             "model": LinkAdd,
             "description": "Incorrect URL! Maybe already exist.",
         },
-        403: {"description": "Incorrect token! Login first!"},
-        500: {"description": "Server error!"},
     },
 )
 @limiter.limit("100/minute")
@@ -67,30 +64,16 @@ async def add_link(
     request: Request,
     user: User | None = Depends(is_user_exist),
 ):
-    try:
-        s_url = f"http://{DOMAIN}/{generate_url()}"
-        await urls_db.execute(
-            insert(Url).values(
-                original_url=link.link,
-                shortened_url=s_url,
-                clicks=0,
-                user_id=user.id,
-            )
-        )
-        await urls_db.commit()
-
-    except MultipleResultsFound as e:
-        logger.exception(f"sqlalchemy.exc.MultipleResultsFound: {e}!")
-
-        await urls_db.rollback()
-        raise HTTPException(status_code=400)
-
-    except (IntegrityError, SQLAlchemyError) as e:
-        logger.exception(f"DB Error: {e}!")
-
-        await urls_db.rollback()
-        raise HTTPException(status_code=500, detail="Server error!")
-
+    s_url = f"http://{DOMAIN}/{generate_url()}"
+    await transaction_process(
+        urls_db,
+        insert(Url).values(
+            original_url=link.link,
+            shortened_url=s_url,
+            clicks=0,
+            user_id=user.id,
+        ),
+    )
     return {"original_url": link.link, "shortened_url": s_url}
 
 
@@ -101,9 +84,7 @@ async def add_link(
         400: {
             "model": LinkDelete,
             "description": "Incorrect URL! Maybe isn't exist.",
-        },
-        403: {"description": "Incorrect token! Login first!"},
-        500: {"description": "Server error!"},
+        }
     },
 )
 @limiter.limit("100/minute")
@@ -113,32 +94,27 @@ async def delete_link(
     request: Request,
     user: User | None = Depends(is_user_exist),
 ):
-    try:
-        is_exist = (
-            await urls_db.execute(
-                select(Url).where(
-                    Url.shortened_url == shortened_link.link,
-                    Url.user_id == user.id,
-                )
-            )
-        ).scalar_one_or_none()
-        if is_exist is None:
-            logger.warning(f"User in db is not exist {request.client.host}!")
-            raise HTTPException(status_code=400)
-
-        await urls_db.execute(
-            delete(Url).where(
+    is_exist = (
+        await transaction_process(
+            urls_db,
+            select(Url).where(
                 Url.shortened_url == shortened_link.link,
                 Url.user_id == user.id,
-            )
+            ),
         )
-        await urls_db.commit()
+    ).scalar_one_or_none()
+    if is_exist is None:
+        logger.warning(f"User in db is not exist {request.client.host}!")
 
-    except (IntegrityError, SQLAlchemyError) as e:
-        logger.exception(f"DB Error: {e}!")
+        raise HTTPException(status_code=400)
 
-        await urls_db.rollback()
-        raise HTTPException(status_code=500, detail="Server error!")
+    await transaction_process(
+        urls_db,
+        delete(Url).where(
+            Url.shortened_url == shortened_link.link,
+            Url.user_id == user.id,
+        ),
+    )
 
 
 @admin.get(
@@ -146,8 +122,6 @@ async def delete_link(
     tags=["Admin"],
     responses={
         400: {"description": "Incorrect URL! Maybe isn't exist."},
-        403: {"description": "Incorrect token! Login first!"},
-        500: {"description": "Server error!"},
     },
 )
 @limiter.limit("100/minute")
@@ -156,26 +130,20 @@ async def get_all_links(
     request: Request,
     user: User | None = Depends(is_user_exist),
 ):
-    try:
-        urls = (await urls_db.execute(select(Url).where(Url.user_id == user.id))).scalars()
-        if urls is None:
-            raise HTTPException(status_code=400)
+    urls = (await transaction_process(urls_db, select(Url).where(Url.user_id == user.id))).scalars()
+    if urls is None:
+        raise HTTPException(status_code=400)
 
-        url_list = []
-        for i in urls:
-            url_list.append(
-                {
-                    "original_url": i.original_url,
-                    "shortened_url": i.shortened_url,
-                    "clicks": i.clicks,
-                }
-            )
-        return url_list
-
-    except (IntegrityError, SQLAlchemyError) as e:
-        logger.exception(f"DB Error: {e}!")
-
-        raise HTTPException(status_code=500, detail="Server error!")
+    url_list = []
+    for i in urls:
+        url_list.append(
+            {
+                "original_url": i.original_url,
+                "shortened_url": i.shortened_url,
+                "clicks": i.clicks,
+            }
+        )
+    return url_list
 
 
 @admin.post(
@@ -186,8 +154,6 @@ async def get_all_links(
             "model": LinkGetData,
             "description": "Incorrect URL! Maybe already exist.",
         },
-        403: {"description": "Incorrect token! Login first!"},
-        500: {"description": "Server error!"},
     },
 )
 @limiter.limit("100/minute")
@@ -197,26 +163,22 @@ async def get_link_data(
     request: Request,
     user: User | None = Depends(is_user_exist),
 ):
-    try:
-        url = (
-            await urls_db.execute(
-                select(Url).where(
-                    Url.shortened_url == shortened_link.link,
-                    Url.user_id == user.id,
-                )
-            )
-        ).scalar_one_or_none()
-        if url is None:
-            logger.warning(f"Url in db hasn't exist {request.client.host}!")
-            raise HTTPException(status_code=400, detail="Url not found")
+    url = (
+        await transaction_process(
+            urls_db,
+            select(Url).where(
+                Url.shortened_url == shortened_link.link,
+                Url.user_id == user.id,
+            ),
+        )
+    ).scalar_one_or_none()
+    if url is None:
+        logger.warning(f"Url in db hasn't exist {request.client.host}!")
 
-        return {
-            "original_url": url.original_url,
-            "shortened_url": url.shortened_url,
-            "clicks": url.clicks,
-        }
+        raise HTTPException(status_code=400, detail="Url not found")
 
-    except (IntegrityError, SQLAlchemyError) as e:
-        logger.exception(f"DB Error: {e}!")
-
-        raise HTTPException(status_code=500, detail="Server error!")
+    return {
+        "original_url": url.original_url,
+        "shortened_url": url.shortened_url,
+        "clicks": url.clicks,
+    }
