@@ -1,10 +1,7 @@
-from typing import Annotated
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, Cookie, Request
-from sqlalchemy import select, insert, update, delete
-from sqlalchemy.exc import MultipleResultsFound, IntegrityError, SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import select, insert, delete
 from dotenv import load_dotenv
 
 from database.db import urls_db, users_db
@@ -30,7 +27,7 @@ responses_metadata = {
 
 
 async def is_user_exist(request: Request, user_db: users_db) -> User | None:
-    token: str = request.cookies.get("token")
+    token: str | None = request.cookies.get("token")
 
     if token is None:
         logger.warning("User hasn't exist, no token")
@@ -62,7 +59,7 @@ async def add_link(
     link: LinkAdd,
     urls_db: urls_db,
     request: Request,
-    user: User | None = Depends(is_user_exist),
+    user: User = Depends(is_user_exist),
 ):
     s_url = f"http://{DOMAIN}/{generate_url()}"
     await transaction_process(
@@ -92,7 +89,7 @@ async def delete_link(
     shortened_link: LinkDelete,
     urls_db: urls_db,
     request: Request,
-    user: User | None = Depends(is_user_exist),
+    user: User = Depends(is_user_exist),
 ):
     is_exist = (
         await transaction_process(
@@ -104,7 +101,7 @@ async def delete_link(
         )
     ).scalar_one_or_none()
     if is_exist is None:
-        logger.warning(f"User in db is not exist {request.client.host}!")
+        logger.warning(f"User in db is not exist!")
 
         raise HTTPException(status_code=400)
 
@@ -128,7 +125,7 @@ async def delete_link(
 async def get_all_links(
     urls_db: urls_db,
     request: Request,
-    user: User | None = Depends(is_user_exist),
+    user: User = Depends(is_user_exist),
 ):
     urls = (await transaction_process(urls_db, select(Url).where(Url.user_id == user.id))).scalars()
     if urls is None:
@@ -161,7 +158,7 @@ async def get_link_data(
     shortened_link: LinkGetData,
     urls_db: urls_db,
     request: Request,
-    user: User | None = Depends(is_user_exist),
+    user: User = Depends(is_user_exist),
 ):
     url = (
         await transaction_process(
@@ -173,7 +170,7 @@ async def get_link_data(
         )
     ).scalar_one_or_none()
     if url is None:
-        logger.warning(f"Url in db hasn't exist {request.client.host}!")
+        logger.warning(f"Url in db hasn't exist!")
 
         raise HTTPException(status_code=400, detail="Url not found")
 

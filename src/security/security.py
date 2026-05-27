@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 SECRET_KEY = os.getenv("SECRET_KEY")
+assert SECRET_KEY is not None, "SECRET_KEY is not defioned in .env"
 
 
 async def create_token(id: int) -> str:

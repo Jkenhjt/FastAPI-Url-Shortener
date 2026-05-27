@@ -16,10 +16,15 @@ from sqlalchemy.exc import (
 from fastapi import Depends
 from dotenv import load_dotenv
 
+from utils.logger import logger
+
 load_dotenv()
 
 DATABASE_URL_USERS = os.getenv("DATABASE_URL_USERS")
 DATABASE_URL_URLS = os.getenv("DATABASE_URL_URLS")
+
+assert DATABASE_URL_USERS is not None, "DATABASE_URL_USERS Variable not found in enviroment"
+assert DATABASE_URL_URLS is not None, "DATABASE_URL_USERS Variable not found in enviroment"
 
 try:
     async_engine_users = create_async_engine(DATABASE_URL_USERS, echo=True)

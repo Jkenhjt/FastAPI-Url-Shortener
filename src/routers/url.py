@@ -1,4 +1,3 @@
-import logging
 import os
 from typing import Annotated
 
@@ -6,7 +5,6 @@ from dotenv import load_dotenv
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select, update
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from database.db import urls_db
 from models.url import Url
@@ -21,12 +19,12 @@ DOMAIN = os.getenv("DOMAIN")
 url = APIRouter()
 
 
-async def increment_clicks_url(urls_db: urls_db) -> bool:
+async def increment_clicks_url(url: Url, urls_db: urls_db):
     await transaction_process(
         urls_db,
         update(Url)
-        .where(Url.shortened_url == original_url.shortened_url)
-        .values(clicks=original_url.clicks + 1),
+        .where(Url.shortened_url == url.shortened_url)
+        .values(clicks=url.clicks + 1),
     )
 
 
@@ -38,11 +36,11 @@ async def get_original_url(s_url: str, urls_db: urls_db) -> Url:
     ).scalar_one_or_none()
 
     if original_url is None:
-        logger.warning(f"DB response is None {request.client.host}!")
+        logger.warning(f"DB response is None!")
 
         raise HTTPException(status_code=400, detail="Url not found")
 
-    await increment_clicks_url(urls_db)
+    await increment_clicks_url(original_url, urls_db)
 
     return original_url
 

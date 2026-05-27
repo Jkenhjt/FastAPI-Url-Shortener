@@ -2,7 +2,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response, HTTPException
 from sqlalchemy import select, insert, update
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from database.db import users_db
 from schemas.user import User_m
@@ -59,7 +58,7 @@ async def register(
 
     result = (
         await transaction_process(user_db, select(User).where(User.username == user_m.username))
-    ).scalar_one_or_none()
+    ).scalar_one()
 
     token = await create_token(result.id)
 
@@ -86,11 +85,11 @@ async def login(
     user_db: users_db,
     request: Request,
     response: Response,
-    user: Annotated[User | None, Depends(is_user_exist)],
+    user: Annotated[User, Depends(is_user_exist)],
 ):
     result = await compare_pass(user_m.password, user.password)
     if result == False:
-        logger.warning(f"Passwords {request.client.host} are diffrent!")
+        logger.warning(f"Passwords are diffrent!")
 
         raise HTTPException(status_code=400)
 

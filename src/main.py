@@ -1,5 +1,4 @@
 from contextlib import asynccontextmanager
-import logging
 
 from fastapi import FastAPI
 from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError

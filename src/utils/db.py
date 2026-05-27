@@ -1,6 +1,9 @@
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import MultipleResultsFound, IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.expression import Executable
+
+from fastapi import HTTPException
+
 from utils.logger import logger
 
 
