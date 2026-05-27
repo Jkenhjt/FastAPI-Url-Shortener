@@ -22,9 +22,7 @@ url = APIRouter()
 async def increment_clicks_url(url: Url, urls_db: urls_db):
     await transaction_process(
         urls_db,
-        update(Url)
-        .where(Url.shortened_url == url.shortened_url)
-        .values(clicks=url.clicks + 1),
+        update(Url).where(Url.shortened_url == url.shortened_url).values(clicks=url.clicks + 1),
     )
 
 
